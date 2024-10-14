@@ -2,6 +2,7 @@ let map;
 let citiesData;
 let polygonsData;
 let currentPolygons = [];
+let currentMarkers = [];
 
 async function initMap() {
     map = new google.maps.Map(document.getElementById("map"), {
@@ -51,6 +52,14 @@ function displayPolygonForCity(cityName) {
     newPolygon.setMap(map);
     currentPolygons.push({ cityId: city.id, polygon: newPolygon });
 
+    // Add a marker for the city
+    const marker = new google.maps.Marker({
+        position: { lat: city.lat, lng: city.lng },
+        map: map,
+        title: city.name
+    });
+    currentMarkers.push(marker);
+
     adjustMapView();
 }
 
@@ -86,6 +95,12 @@ function clearMap() {
         polygonObj.polygon.setMap(null);
     });
     currentPolygons = [];
+
+    // Clear markers
+    currentMarkers.forEach(marker => {
+        marker.setMap(null);
+    });
+    currentMarkers = [];
 
     map.setCenter({ lat: 31.0461, lng: 34.8516 });
     map.setZoom(8);

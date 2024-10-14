@@ -1,5 +1,12 @@
 // screenshot.js
 const puppeteer = require('puppeteer');
+const fs = require('fs');
+const path = require('path');
+
+// Add this helper function at the top of your file, outside of any other function
+function delay(ms) {
+    return new Promise(resolve => setTimeout(resolve, ms));
+}
 
 (async () => {
     // Launch the browser
@@ -20,64 +27,78 @@ const puppeteer = require('puppeteer');
         return;
     }
 
-    // Log the page content
-    const pageContent = await page.content();
-    console.log('Page content:', pageContent);
+    console.log('Page content loaded');
+
+    // Function to fetch alert data from API
+    async function fetchAlertData() {
+        try {
+            const response = await fetch('http://localhost:3000/api/alert');
+            const data = await response.json();
+            return data;
+        } catch (error) {
+            console.error('Error fetching alert data:', error);
+            return null;
+        }
+    }
 
     // Function to check for active alert and take screenshot
     async function checkForAlert() {
         try {
-            const alertInfo = await page.evaluate(() => {
-                console.log('Current polygonsDisplayed value:', window.polygonsDisplayed);
-                return {
-                    isActive: window.polygonsDisplayed,
-                    cities: window.alertedCities || []
-                };
-            });
+            // Fetch alert data
+            const alertData = await page.evaluate(fetchAlertData);
+            console.log('Alert data:', alertData);
 
-            console.log('Alert info:', alertInfo);
-
-            if (alertInfo.isActive) {
+            if (alertData && alertData.type !== 'none' && alertData.cities && alertData.cities.length > 0) {
                 console.log('Alert is active!');
                 
-                // Check if there are new cities
-                const newCities = alertInfo.cities.filter(city => !previousCities.includes(city));
+                // Check if there are new cities or if it's a new alert ID
+                const newCities = alertData.cities.filter(city => !previousCities.includes(city));
+                const isNewAlert = alertData.id !== previousAlertId;
                 
-                if (newCities.length > 0) {
-                    console.log('New cities detected:', newCities);
-                    console.log('Waiting 5 seconds before taking screenshot...');
+                if (newCities.length > 0 || isNewAlert) {
+                    console.log('New cities detected or new alert. Waiting 2 seconds before taking screenshot...');
                     
-                    // Delay for 5 seconds
-                    await new Promise(resolve => setTimeout(resolve, 5000));
-
-                    console.log('Taking screenshot now...');
+                    // Add a 2-second delay
+                    await delay(3000);
+                    
                     const mapElement = await page.$('#map');
 
                     if (mapElement) {
-                        const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-                        await mapElement.screenshot({ path: `alert-map-${timestamp}.png` });
-                        console.log(`Screenshot saved as alert-map-${timestamp}.png`);
+                        const screenshotDir = 'screenshots';
                         
-                        // Update the previous cities list
-                        previousCities = alertInfo.cities;
+                        // Ensure the screenshots directory exists
+                        if (!fs.existsSync(screenshotDir)) {
+                            fs.mkdirSync(screenshotDir);
+                        }
+
+                        const screenshotPath = path.join(screenshotDir, `alert-${alertData.id}.png`);
+
+                        await mapElement.screenshot({ path: screenshotPath });
+                        console.log(`Screenshot saved as ${screenshotPath}`);
+                        
+                        // Update the previous cities list and alert ID
+                        previousCities = alertData.cities;
+                        previousAlertId = alertData.id;
                     } else {
                         console.log('Map element not found!');
                     }
                 } else {
-                    console.log('No new cities in alert. Skipping screenshot.');
+                    console.log('No new cities added and same alert ID. Skipping screenshot.');
                 }
             } else {
                 console.log('No active alert.');
-                // Reset previous cities when there's no active alert
+                // Reset previous cities and alert ID when there's no active alert
                 previousCities = [];
+                previousAlertId = null;
             }
         } catch (error) {
             console.error('Error checking for alert:', error);
         }
     }
 
-    // Initialize previousCities array
+    // Initialize previousCities array and previousAlertId
     let previousCities = [];
+    let previousAlertId = null;
 
     // Periodically check for alert
     setInterval(checkForAlert, 5000); // Check every 5 seconds

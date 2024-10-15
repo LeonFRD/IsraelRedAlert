@@ -59,7 +59,7 @@ function delay(ms) {
                     console.log('New cities detected or new alert. Waiting 2 seconds before taking screenshot...');
                     
                     // Add a 2-second delay
-                    await delay(3000);
+                    await delay(4000);
                     
                     const mapElement = await page.$('#map');
 

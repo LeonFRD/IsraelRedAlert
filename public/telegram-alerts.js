@@ -67,12 +67,18 @@ async function checkAndSendAlert() {
 
 async function sendNewAlert(message, alertId) {
     try {
+        // Check if this alert has already been sent
+        if (lastAlertId === alertId) {
+            console.log(`Alert ID ${alertId} has already been sent. Skipping.`);
+            return;
+        }
+
         // Split and send text messages
         const sentMessages = await sendSplitMessages(message);
         console.log(`New alert text sent to Telegram group. Alert ID: ${alertId}`);
         lastMessageIds = sentMessages.map(msg => msg.message_id);
 
-        // Wait for 3 seconds before sending the screenshot
+        // Wait for 5 seconds before sending the screenshot
         await new Promise(resolve => setTimeout(resolve, 6000));
 
         // Send screenshot if available
@@ -82,6 +88,9 @@ async function sendNewAlert(message, alertId) {
             console.log(`Screenshot sent for alert ID: ${alertId}`);
             lastScreenshotId = sentPhoto.message_id;
         }
+
+        // Update lastAlertId after successfully sending everything
+        lastAlertId = alertId;
     } catch (telegramError) {
         console.error('Error sending new alert to Telegram:', telegramError.message);
         handleTelegramError(telegramError);
@@ -244,7 +253,7 @@ async function getScreenshotPath(alertId) {
 
 async function sendSplitMessages(message) {
     const maxLength = 4096; // Telegram's maximum message length
-    const messages = [];
+    const chunks = [];
 
     while (message.length > 0) {
         let chunk = message.slice(0, maxLength);
@@ -255,14 +264,19 @@ async function sendSplitMessages(message) {
             chunk = chunk.slice(0, lastNewline);
         }
 
-        messages.push(chunk);
+        chunks.push(chunk);
         message = message.slice(chunk.length);
     }
 
     const sentMessages = [];
-    for (const chunk of messages) {
+    for (const chunk of chunks) {
+        // Send the message
         const sentMessage = await bot.sendMessage(chatId, chunk, { parse_mode: 'Markdown' });
         sentMessages.push(sentMessage);
+
+        // Add a delay of 1 second (1000 milliseconds) between messages
+        // You can adjust this value as needed
+        await new Promise(resolve => setTimeout(resolve, 1000));
     }
 
     return sentMessages;

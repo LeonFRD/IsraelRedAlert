@@ -1,283 +1,304 @@
-const TelegramBot = require('node-telegram-bot-api');
 const axios = require('axios');
+const TelegramBot = require('node-telegram-bot-api');
 const fs = require('fs').promises;
-const path = require('path');
 
-// Replace with your bot token and chat ID
 const botToken = '7781785682:AAG7bE8-PeWb6PKuMSEzJLGHlLlXSzqDU78';
 const chatId = '-1002299701125';
+const serverUrl = 'http://localhost:3000'; // Adjust this if your server is running on a different URL
 
-// Create a bot instance
-const bot = new TelegramBot(botToken);
+const bot = new TelegramBot(botToken, { polling: false });
 
-// Set the polling interval (in milliseconds)
-const pollingInterval = 5000;
+let lastAlertState = null;
+let lastMessageId = null;
+const CHECK_INTERVAL = 1000; // Check every 1 second
 
-// Keep track of the last alert ID, message ID, and cities
-let lastAlertId = null;
-let lastMessageIds = [];
-let lastAlertCities = null; // New variable to store the last alert's cities
-let lastScreenshotId = null;
-
-async function checkAndSendAlert() {
-    try {
-        const response = await axios.get('http://localhost:3000/api/alert');
-        const alert = response.data;
-
-        if (alert.type !== 'none') {
-            // Load city data
-            const citiesData = await loadCitiesData();
-            
-            // Check if the cities have changed
-            const citiesChanged = !lastAlertCities || 
-                !arraysEqual(alert.cities.sort(), lastAlertCities.sort());
-
-            if (alert.id !== lastAlertId || citiesChanged) {
-                // Format the message with sorted cities and countdown
-                const message = formatAlertMessage(alert, citiesData);
-
-                if (alert.id !== lastAlertId) {
-                    // New alert: send a new message
-                    await sendNewAlert(message, alert.id);
-                } else if (citiesChanged) {
-                    // Existing alert with changed cities: update the message
-                    await updateAlertMessage(message, alert.id);
-                }
-
-                lastAlertId = alert.id;
-                lastAlertCities = [...alert.cities]; // Store a copy of the current cities
-            }
-        } else if (alert.type === 'none' && lastAlertId !== null) {
-            // Reset the last alert ID and cities, but don't send an "All clear" message
-            lastAlertId = null;
-            lastAlertCities = null;
-            lastMessageIds = [];
-        }
-    } catch (error) {
-        console.error('Error checking or sending alert:', error.message);
-        if (error.code === 'ECONNRESET') {
-            console.log('Connection was reset. This might be due to server instability or network issues.');
-            console.log('Retrying in 10 seconds...');
-            setTimeout(checkAndSendAlert, 10000);
-        } else {
-            console.error('Full error object:', error);
-        }
-    }
-}
-
-async function sendNewAlert(message, alertId) {
-    try {
-        // Check if this alert has already been sent
-        if (lastAlertId === alertId) {
-            console.log(`Alert ID ${alertId} has already been sent. Skipping.`);
-            return;
-        }
-
-        // Split and send text messages
-        const sentMessages = await sendSplitMessages(message);
-        console.log(`New alert text sent to Telegram group. Alert ID: ${alertId}`);
-        lastMessageIds = sentMessages.map(msg => msg.message_id);
-
-        // Wait for 5 seconds before sending the screenshot
-        await new Promise(resolve => setTimeout(resolve, 6000));
-
-        // Send screenshot if available
-        const screenshotPath = await getScreenshotPath(alertId);
-        if (screenshotPath) {
-            const sentPhoto = await bot.sendPhoto(chatId, screenshotPath);
-            console.log(`Screenshot sent for alert ID: ${alertId}`);
-            lastScreenshotId = sentPhoto.message_id;
-        }
-
-        // Update lastAlertId after successfully sending everything
-        lastAlertId = alertId;
-    } catch (telegramError) {
-        console.error('Error sending new alert to Telegram:', telegramError.message);
-        handleTelegramError(telegramError);
-    }
-}
-
-async function updateAlertMessage(message, alertId) {
-    if (lastMessageIds && lastMessageIds.length > 0) {
-        try {
-            // Delete all previous text messages
-            for (const messageId of lastMessageIds) {
-                await bot.deleteMessage(chatId, messageId);
-            }
-            console.log(`Previous alert messages deleted. Message IDs: ${lastMessageIds.join(', ')}`);
-            
-            // Delete the previous screenshot if it exists
-            if (lastScreenshotId) {
-                await bot.deleteMessage(chatId, lastScreenshotId);
-                console.log(`Previous screenshot deleted. Message ID: ${lastScreenshotId}`);
-            }
-            
-            // Send new split messages with updated information
-            const sentMessages = await sendSplitMessages(message);
-            console.log(`Updated alert text sent to Telegram group. Alert ID: ${alertId}`);
-            lastMessageIds = sentMessages.map(msg => msg.message_id);
-
-            // Wait for 3 seconds before sending the updated screenshot
-            await new Promise(resolve => setTimeout(resolve, 3000));
-
-            // Send updated screenshot if available
-            const screenshotPath = await getScreenshotPath(alertId);
-            if (screenshotPath) {
-                const sentPhoto = await bot.sendPhoto(chatId, screenshotPath);
-                console.log(`Updated screenshot sent for alert ID: ${alertId}`);
-                lastScreenshotId = sentPhoto.message_id;
-            } else {
-                lastScreenshotId = null;
-            }
-        } catch (telegramError) {
-            console.error('Error updating alert in Telegram:', telegramError.message);
-            handleTelegramError(telegramError);
-        }
-    } else {
-        // If for some reason we don't have the last message IDs, just send a new message
-        await sendNewAlert(message, alertId);
-    }
-}
-
-function handleTelegramError(error) {
-    if (error.message.includes('chat not found')) {
-        console.log('Please check if the bot is added to the chat and the chat ID is correct.');
-    }
-}
+let citiesData = {};
 
 async function loadCitiesData() {
     try {
-        const response = await axios.get('http://localhost:3000/data/cities.json');
-        return response.data;
+        const data = await fs.readFile('./data/cities.json', 'utf8');
+        const cities = JSON.parse(data);
+        cities.forEach(city => {
+            citiesData[city.name] = city;
+        });
+        console.log('Cities data loaded successfully.');
     } catch (error) {
-        console.error('Error loading cities data:', error.message);
-        return [];
+        console.error('Error loading cities data:', error);
     }
 }
 
-function formatAlertMessage(alert, citiesData) {
-    const now = new Date();
-    const timestamp = now.toLocaleString('he-IL', { 
-        timeZone: 'Asia/Jerusalem', 
-        hour: '2-digit', 
-        minute: '2-digit', 
-        hour12: false 
-    });
-    
-    let message = `🚨 *Alert Type: ${alert.type}* (${timestamp})\n`;
-    message += `Alert ID: ${alert.id}\n\n`;
-    
-    // Group cities by zone
-    const cityGroups = {};
-    alert.cities.forEach(cityName => {
-        const cityData = citiesData.find(city => city.name === cityName || city.name_en === cityName);
-        if (cityData) {
-            const zone = cityData.zone || 'Unknown Zone';
-            if (!cityGroups[zone]) {
-                cityGroups[zone] = [];
-            }
-            cityGroups[zone].push({ name: cityName, countdown: cityData.countdown });
+async function fetchAlert() {
+    const response = await axios.get(`${serverUrl}/api/alert`);
+    return response.data;
+}
+
+async function fetchAlertHistory() {
+    const response = await axios.get(`${serverUrl}/api/alert-history`);
+    return response.data;
+}
+
+function alertHasChanged(currentAlert, lastAlert) {
+    if (!lastAlert) return true;
+    if (currentAlert.id !== lastAlert.id) return true;
+    if (currentAlert.type !== lastAlert.type) return true;
+    if (JSON.stringify(currentAlert.cities.sort()) !== JSON.stringify(lastAlert.cities.sort())) return true;
+    return false;
+}
+
+function groupAndDeduplicateHistory(history, alertId) {
+    const relevantHistory = history.filter(entry => entry.id === alertId);
+    const groupedHistory = {};
+
+    relevantHistory.forEach(entry => {
+        if (!groupedHistory[entry.timestamp]) {
+            groupedHistory[entry.timestamp] = {
+                type: entry.type,
+                cities: new Set(entry.cities),
+                simulated: entry.simulated
+            };
+        } else {
+            entry.cities.forEach(city => groupedHistory[entry.timestamp].cities.add(city));
         }
     });
 
-    // Sort zones and cities within each zone
-    Object.keys(cityGroups).sort().forEach(zone => {
-        message += `*${zone}:*\n`;
-        const sortedCities = cityGroups[zone].sort((a, b) => a.countdown - b.countdown);
-        
-        let currentCountdown = null;
-        let citiesWithSameCountdown = [];
-        let zoneMessage = '';
+    return Object.entries(groupedHistory).map(([timestamp, data]) => ({
+        timestamp,
+        type: data.type,
+        cities: Array.from(data.cities),
+        simulated: data.simulated
+    }));
+}
 
-        sortedCities.forEach((city, index) => {
-            if (city.countdown !== currentCountdown) {
-                if (citiesWithSameCountdown.length > 0) {
-                    zoneMessage += `${citiesWithSameCountdown.join(', ')} (${currentCountdown} דקות), `;
-                    citiesWithSameCountdown = [];
-                }
-                currentCountdown = city.countdown;
-            }
-            citiesWithSameCountdown.push(city.name);
-
-            if (index === sortedCities.length - 1) {
-                zoneMessage += `${citiesWithSameCountdown.join(', ')} (${currentCountdown} דקות)`;
-            }
+function sortAndGroupCities(cities) {
+    const sortedCities = cities
+        .filter(city => citiesData[city]) // Filter out cities not in the JSON
+        .sort((a, b) => {
+            const zoneA = citiesData[a].zone;
+            const zoneB = citiesData[b].zone;
+            if (zoneA !== zoneB) return zoneA.localeCompare(zoneB);
+            return citiesData[a].countdown - citiesData[b].countdown;
         });
 
-        message += `${zoneMessage}\n\n`;
+    const groupedCities = [];
+    let currentZone = '';
+    let currentCountdown = null;
+    let cityGroup = [];
+
+    sortedCities.forEach(city => {
+        const cityData = citiesData[city];
+        if (cityData.zone !== currentZone || cityData.countdown !== currentCountdown) {
+            if (cityGroup.length > 0) {
+                groupedCities.push({
+                    zone: currentZone,
+                    countdown: currentCountdown,
+                    cities: cityGroup
+                });
+            }
+            currentZone = cityData.zone;
+            currentCountdown = cityData.countdown;
+            cityGroup = [city];
+        } else {
+            cityGroup.push(city);
+        }
     });
 
-    message += `\nStay safe and follow local instructions.`;
-    return message;
-}
-
-// Start the polling process
-function startPolling() {
-    checkAndSendAlert(); // Initial check
-    setInterval(checkAndSendAlert, pollingInterval);
-    console.log('Telegram alert system started');
-}
-
-// Test the bot connection
-bot.getMe().then((botInfo) => {
-    console.log('Bot connected successfully. Bot username:', botInfo.username);
-}).catch((error) => {
-    console.error('Error connecting to bot:', error.message);
-});
-
-startPolling();
-
-// Helper function to compare arrays
-function arraysEqual(a, b) {
-    if (a.length !== b.length) return false;
-    for (let i = 0; i < a.length; i++) {
-        if (a[i] !== b[i]) return false;
+    if (cityGroup.length > 0) {
+        groupedCities.push({
+            zone: currentZone,
+            countdown: currentCountdown,
+            cities: cityGroup
+        });
     }
+
+    return groupedCities;
+}
+
+let lastMessageIds = {};
+
+async function sendAlertMessage(alert, history) {
+    const groupedHistory = groupAndDeduplicateHistory(history, alert.id);
+    
+    const currentDate = new Date().toLocaleDateString('he-IL', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+    });
+    
+    // Determine the alert type and emoji for the title
+    let alertTypeEmoji = '';
+    let alertTypeText = '';
+    let includeCountdown = false;
+    switch (alert.type) {
+        case 'hostileAircraftIntrusion':
+            alertTypeEmoji = '✈️';
+            alertTypeText = 'חדירת כלי טיס עוין';
+            break;
+        case 'missiles':
+            alertTypeEmoji = '🚀';
+            alertTypeText = 'התראת צבע אדום';
+            includeCountdown = true;
+            break;
+        case 'simulated':
+            alertTypeEmoji = '🔵';
+            alertTypeText = 'סימולציה';
+            includeCountdown = true;
+            break;
+        default:
+            alertTypeEmoji = '🚨';
+            alertTypeText = alert.type;
+    }
+    
+    let message = `${alertTypeEmoji} ${alertTypeText} - ${currentDate} ${alertTypeEmoji}\n\n`;
+    message += `מזהה התרעה: ${alert.id}\n\n`;
+
+    const timeGroupedHistory = {};
+    let lastCitiesSet = new Set();
+
+    groupedHistory.forEach(entry => {
+        const timestamp = new Date(entry.timestamp);
+        const timeString = timestamp.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', hour12: false });
+        
+        const currentCitiesSet = new Set(entry.cities);
+        
+        if (!setsAreEqual(currentCitiesSet, lastCitiesSet)) {
+            if (!timeGroupedHistory[timeString]) {
+                timeGroupedHistory[timeString] = {};
+            }
+            
+            entry.cities.forEach(city => {
+                const zone = citiesData[city]?.zone || 'לא ידוע';
+                const countdown = citiesData[city]?.countdown || 'לא ידוע';
+                if (!timeGroupedHistory[timeString][zone]) {
+                    timeGroupedHistory[timeString][zone] = {};
+                }
+                if (!timeGroupedHistory[timeString][zone][countdown]) {
+                    timeGroupedHistory[timeString][zone][countdown] = [];
+                }
+                timeGroupedHistory[timeString][zone][countdown].push(city);
+            });
+            
+            lastCitiesSet = currentCitiesSet;
+        }
+    });
+
+    // Sort times
+    const sortedTimes = Object.keys(timeGroupedHistory).sort();
+
+    sortedTimes.forEach(time => {
+        message += `\n${time}:\n`;
+        const zones = Object.keys(timeGroupedHistory[time]).sort();
+        zones.forEach(zone => {
+            message += `• *${zone}:*`;
+            const countdowns = Object.keys(timeGroupedHistory[time][zone]).sort((a, b) => parseInt(a) - parseInt(b));
+            countdowns.forEach(countdown => {
+                const cities = timeGroupedHistory[time][zone][countdown];
+                const citiesString = cities.join(', ');
+                if (includeCountdown) {
+                    const countdownUrl = `https://t.me/AlertsOfIsrael`;
+                    let countdownText;
+                    if (countdown === '0' || countdown === 0) {
+                        countdownText = 'מיידי';
+                    } else if (countdown !== 'לא ידוע') {
+                        countdownText = `${countdown} שניות`;
+                    } else {
+                        countdownText = '';
+                    }
+                    
+                    if (countdownText) {
+                        message += `${citiesString} [(${countdownText})](${countdownUrl})`;
+                    } else {
+                        message += `${citiesString}`;
+                    }
+                } else {
+                    message += `${citiesString}`;
+                }
+            });
+            message += '\n';
+        });
+    });
+
+    // Split the message into parts if it's too long
+    const MAX_MESSAGE_LENGTH = 4000; // Leave some buffer for Telegram's limit
+    let messageParts = [];
+    let currentPart = message;
+
+    while (currentPart.length > MAX_MESSAGE_LENGTH) {
+        let splitIndex = currentPart.lastIndexOf('\n', MAX_MESSAGE_LENGTH);
+        if (splitIndex === -1 || splitIndex > MAX_MESSAGE_LENGTH) {
+            splitIndex = MAX_MESSAGE_LENGTH;
+        }
+        messageParts.push(currentPart.substring(0, splitIndex));
+        currentPart = currentPart.substring(splitIndex);
+    }
+    messageParts.push(currentPart);
+
+    // Delete previous messages with the same alert ID
+    if (lastMessageIds[alert.id]) {
+        for (const messageId of lastMessageIds[alert.id]) {
+            try {
+                await bot.deleteMessage(chatId, messageId);
+            } catch (error) {
+                console.error('Error deleting previous message:', error.message);
+            }
+        }
+    }
+
+    // Send each part of the message and store their IDs
+    lastMessageIds[alert.id] = [];
+    for (let i = 0; i < messageParts.length; i++) {
+        const partMessage = `${alertTypeEmoji} ${alertTypeText} - Part ${i + 1}/${messageParts.length} ${alertTypeEmoji}\n\n${messageParts[i]}`;
+        const sentMessage = await bot.sendMessage(chatId, partMessage, { parse_mode: 'Markdown' });
+        lastMessageIds[alert.id].push(sentMessage.message_id);
+    }
+
+    console.log(`Alert history update sent to Telegram group in ${messageParts.length} parts.`);
+}
+
+// Helper function to compare sets
+function setsAreEqual(a, b) {
+    if (a.size !== b.size) return false;
+    for (let item of a) if (!b.has(item)) return false;
     return true;
 }
 
-async function getScreenshotPath(alertId) {
-    const screenshotFileName = `alert-${alertId}.png`;
-    const screenshotPath = path.join('C:', 'Users', 'danie', 'OneDrive', 'Desktop', 'zevaAdomNew', 'newredalert', 'public', 'screenshots', screenshotFileName);
-    
+async function checkAndSendAlert() {
     try {
-        await fs.access(screenshotPath);
-        console.log(`Screenshot found for alert ID: ${alertId} at path: ${screenshotPath}`);
-        return screenshotPath;
-    } catch (error) {
-        console.error(`Screenshot not found for alert ID: ${alertId}`);
-        console.error(`Attempted path: ${screenshotPath}`);
-        return null;
-    }
-}
+        const currentAlert = await fetchAlert();
 
-async function sendSplitMessages(message) {
-    const maxLength = 4096; // Telegram's maximum message length
-    const chunks = [];
-
-    while (message.length > 0) {
-        let chunk = message.slice(0, maxLength);
-        
-        // If the chunk ends in the middle of a line, find the last newline
-        const lastNewline = chunk.lastIndexOf('\n');
-        if (lastNewline > 0 && chunk.length === maxLength) {
-            chunk = chunk.slice(0, lastNewline);
+        if (currentAlert.type === 'none' || !currentAlert.id) {
+            if (lastAlertState && lastAlertState.type !== 'none') {
+                // Send an "Alert has ended" message without deleting the last alert message
+                await bot.sendMessage(chatId, '⚠️ Alert has ended ⚠️');
+                console.log('Alert ended notification sent.');
+                lastMessageId = null; // Reset lastMessageId so we don't try to delete it next time
+            }
+            lastAlertState = currentAlert;
+            return;
         }
 
-        chunks.push(chunk);
-        message = message.slice(chunk.length);
+        if (alertHasChanged(currentAlert, lastAlertState)) {
+            const fullHistory = await fetchAlertHistory();
+            await sendAlertMessage(currentAlert, fullHistory);
+            lastAlertState = JSON.parse(JSON.stringify(currentAlert)); // Deep copy
+        }
+    } catch (error) {
+        console.error('Error checking and sending alert:', error.message);
     }
-
-    const sentMessages = [];
-    for (const chunk of chunks) {
-        // Send the message
-        const sentMessage = await bot.sendMessage(chatId, chunk, { parse_mode: 'Markdown' });
-        sentMessages.push(sentMessage);
-
-        // Add a delay of 1 second (1000 milliseconds) between messages
-        // You can adjust this value as needed
-        await new Promise(resolve => setTimeout(resolve, 1000));
-    }
-
-    return sentMessages;
 }
+
+// Load cities data before starting the main loop
+loadCitiesData().then(() => {
+    // Run the check frequently
+    setInterval(checkAndSendAlert, CHECK_INTERVAL);
+    console.log('Telegram Alert Tracker with Sorted Cities and Countdown is running...');
+});
+
+// Optional: Implement a simple health check
+setInterval(async () => {
+    try {
+        await axios.get(`${serverUrl}/api/alert`);
+        console.log('Health check: OK');
+    } catch (error) {
+        console.error('Health check failed:', error.message);
+    }
+}, 60000); // Every minute

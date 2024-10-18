@@ -2,6 +2,8 @@
 const puppeteer = require('puppeteer');
 const fs = require('fs');
 const path = require('path');
+// If using Node.js version < 18, uncomment the next line:
+// const fetch = require('node-fetch');
 
 // Add this helper function at the top of your file, outside of any other function
 function delay(ms) {
@@ -44,8 +46,8 @@ function delay(ms) {
     // Function to check for active alert and take screenshot
     async function checkForAlert() {
         try {
-            // Fetch alert data
-            const alertData = await page.evaluate(fetchAlertData);
+            // Fetch alert data directly in Node.js
+            const alertData = await fetchAlertData();
             console.log('Alert data:', alertData);
 
             if (alertData && alertData.type !== 'none' && alertData.cities && alertData.cities.length > 0) {
@@ -56,10 +58,10 @@ function delay(ms) {
                 const isNewAlert = alertData.id !== previousAlertId;
                 
                 if (newCities.length > 0 || isNewAlert) {
-                    console.log('New cities detected or new alert. Waiting 2 seconds before taking screenshot...');
+                    console.log('New cities detected or new alert. Waiting 5 seconds before taking screenshot...');
                     
-                    // Add a 2-second delay
-                    await delay(4000);
+                    // Add a 5-second delay
+                    await delay(5000);
                     
                     const mapElement = await page.$('#map');
 

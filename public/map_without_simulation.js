@@ -72,21 +72,16 @@ function adjustMapView() {
         currentPolygons.forEach(polygonObj => {
             polygonObj.polygon.getPath().forEach(latLng => bounds.extend(latLng));
         });
-        map.fitBounds(bounds);
-
-        const padding = { top: 50, right: 50, bottom: 50, left: 50 };
-        const newBounds = map.getBounds();
-        const ne = newBounds.getNorthEast();
-        const sw = newBounds.getSouthWest();
-        const topRightLat = ne.lat() + (ne.lat() - sw.lat()) * padding.top / 100;
-        const topRightLng = ne.lng() + (ne.lng() - sw.lng()) * padding.right / 100;
-        const bottomLeftLat = sw.lat() - (ne.lat() - sw.lat()) * padding.bottom / 100;
-        const bottomLeftLng = sw.lng() - (ne.lng() - sw.lng()) * padding.left / 100;
-        const paddedBounds = new google.maps.LatLngBounds(
-            new google.maps.LatLng(bottomLeftLat, bottomLeftLng),
-            new google.maps.LatLng(topRightLat, topRightLng)
-        );
-        map.fitBounds(paddedBounds);
+        // Use minimal padding to zoom in as much as possible
+        const padding = 20; // Adjust this value as needed (in pixels)
+        map.fitBounds(bounds, {
+            padding: {
+                top: padding,
+                right: padding,
+                bottom: padding,
+                left: padding
+            }
+        });
     }
 }
 

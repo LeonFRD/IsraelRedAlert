@@ -1,0 +1,18 @@
+2024/10/18-23:45:17.202 26490 Reusing MANIFEST C:\Users\danie\OneDrive\Desktop\zevaAdomNew\newredalert\public\.wwebjs_auth\session\Default\Local Storage\leveldb/MANIFEST-000001
+2024/10/18-23:45:17.202 26490 Recovering log #23
+2024/10/18-23:45:17.202 26490 Reusing old log C:\Users\danie\OneDrive\Desktop\zevaAdomNew\newredalert\public\.wwebjs_auth\session\Default\Local Storage\leveldb/000023.log 
+2024/10/19-06:25:48.876 2c12c Level-0 table #27: started
+2024/10/19-06:25:48.889 2c12c Level-0 table #27: 15039 bytes OK
+2024/10/19-06:25:48.891 2c12c Delete type=0 #23
+2024/10/19-10:26:02.260 32be0 Level-0 table #29: started
+2024/10/19-10:26:02.274 32be0 Level-0 table #29: 14196 bytes OK
+2024/10/19-10:26:02.275 32be0 Delete type=0 #26
+2024/10/19-10:26:02.275 32be0 Compacting 4@0 + 1@1 files
+2024/10/19-10:26:02.277 32be0 Generated table #30@0: 181 keys, 4983 bytes
+2024/10/19-10:26:02.277 32be0 Compacted 4@0 + 1@1 files => 4983 bytes
+2024/10/19-10:26:02.279 32be0 compacted to: files[ 0 1 1 0 0 0 0 ]
+2024/10/19-10:26:02.279 32be0 Delete type=2 #18
+2024/10/19-10:26:02.279 32be0 Delete type=2 #21
+2024/10/19-10:26:02.279 32be0 Delete type=2 #24
+2024/10/19-10:26:02.279 32be0 Delete type=2 #27
+2024/10/19-10:26:02.279 32be0 Delete type=2 #29

@@ -159,13 +159,14 @@ async function sendAlertMessage(alert, history) {
         const timeString = timestamp.toLocaleTimeString('he-IL', { hour: '2-digit', minute: '2-digit', hour12: false });
         
         const currentCitiesSet = new Set(entry.cities);
+        const newCities = new Set([...currentCitiesSet].filter(x => !lastCitiesSet.has(x)));
         
-        if (!setsAreEqual(currentCitiesSet, lastCitiesSet)) {
+        if (newCities.size > 0) {
             if (!timeGroupedHistory[timeString]) {
                 timeGroupedHistory[timeString] = {};
             }
             
-            entry.cities.forEach(city => {
+            Array.from(newCities).forEach(city => {
                 const zone = citiesData[city]?.zone || 'לא ידוע';
                 const countdown = citiesData[city]?.countdown || 'לא ידוע';
                 if (!timeGroupedHistory[timeString][zone]) {
@@ -177,7 +178,7 @@ async function sendAlertMessage(alert, history) {
                 timeGroupedHistory[timeString][zone][countdown].push(city);
             });
             
-            lastCitiesSet = currentCitiesSet;
+            lastCitiesSet = new Set([...lastCitiesSet, ...newCities]);
         }
     });
 

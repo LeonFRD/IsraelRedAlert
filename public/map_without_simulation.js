@@ -72,16 +72,27 @@ function adjustMapView() {
         currentPolygons.forEach(polygonObj => {
             polygonObj.polygon.getPath().forEach(latLng => bounds.extend(latLng));
         });
-        // Use minimal padding to zoom in as much as possible
-        const padding = 20; // Adjust this value as needed (in pixels)
-        map.fitBounds(bounds, {
-            padding: {
-                top: padding,
-                right: padding,
-                bottom: padding,
-                left: padding
-            }
-        });
+
+        // Fit the map to the bounds
+        map.fitBounds(bounds);
+
+        // Calculate the area of the bounds
+        const ne = bounds.getNorthEast();
+        const sw = bounds.getSouthWest();
+        const boundsArea = (ne.lat() - sw.lat()) * (ne.lng() - sw.lng());
+
+        // Adjust zoom based on the area
+        const currentZoom = map.getZoom();
+        let zoomAdjustment = 0;
+
+        if (boundsArea > 100) {
+            zoomAdjustment = -100; // Zoom out for very large areas
+        } else if (boundsArea < 0.01) {
+            zoomAdjustment = -2; // Zoom in for very small areas
+        }
+
+        // Apply the zoom adjustment
+        map.setZoom(currentZoom + zoomAdjustment);
     }
 }
 

@@ -14,7 +14,29 @@ let simulatedAlert = null;
 let currentAlertId = null;
 let alertHistory = [];
 
-app.get('/api/alert', (req, res) => {
+const MAX_RETRIES = 3;
+const RETRY_DELAY = 1000; // 1 second
+
+function getAlertWithRetry(options, retries = 0) {
+    return new Promise((resolve, reject) => {
+        pikudHaoref.getActiveAlert((err, alert) => {
+            if (err) {
+                console.error(`Error retrieving alert (attempt ${retries + 1}):`, err);
+                if (retries < MAX_RETRIES) {
+                    setTimeout(() => {
+                        resolve(getAlertWithRetry(options, retries + 1));
+                    }, RETRY_DELAY);
+                } else {
+                    reject(err);
+                }
+            } else {
+                resolve(alert);
+            }
+        }, options);
+    });
+}
+
+app.get('/api/alert', async (req, res) => {
     if (simulatedAlert) {
         return res.json(simulatedAlert);
     }
@@ -24,12 +46,10 @@ app.get('/api/alert', (req, res) => {
         // proxy: 'http://user:pass@hostname:port/'
     };
 
-    pikudHaoref.getActiveAlert((err, alert) => {
-        if (err) {
-            console.error('Error retrieving alert:', err);
-            return res.status(500).json({ error: 'Failed to retrieve alert' });
-        }
+    try {
+        const alert = await getAlertWithRetry(options);
         
+        // Process the alert as before
         if (alert.type === 'none') {
             currentAlertId = null;
             alert.id = null;
@@ -51,7 +71,17 @@ app.get('/api/alert', (req, res) => {
         }
 
         res.json(alert);
-    }, options);
+    } catch (error) {
+        console.error('Failed to retrieve alert after multiple attempts:', error);
+        res.json({
+            type: 'none',
+            id: null,
+            title: 'No active alerts',
+            desc: 'Unable to fetch data from Pikud Ha\'oref after multiple attempts',
+            data: [],
+            cities: []
+        });
+    }
 });
 
 app.post('/api/simulate', (req, res) => {
